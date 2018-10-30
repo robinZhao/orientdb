@@ -5,6 +5,7 @@ package com.orientechnologies.orient.core.sql.parser;
 import com.orientechnologies.orient.core.command.OCommandContext;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
 import com.orientechnologies.orient.core.exception.OCommandExecutionException;
+import com.orientechnologies.orient.core.sql.executor.OInsertExecutionPlan;
 import com.orientechnologies.orient.core.sql.executor.OInternalExecutionPlan;
 import com.orientechnologies.orient.core.sql.executor.OResult;
 import com.orientechnologies.orient.core.sql.executor.OResultInternal;
@@ -57,6 +58,9 @@ public class OParenthesisExpression extends OMathExpression {
     }
     if (statement != null) {
       OInternalExecutionPlan execPlan = statement.createExecutionPlan(ctx, false);
+      if (execPlan instanceof OInsertExecutionPlan) {
+        ((OInsertExecutionPlan) execPlan).executeInternal();
+      }
       OLocalResultSet rs = new OLocalResultSet(execPlan);
       List<OResult> result = new ArrayList<>();
       while (rs.hasNext()) {
@@ -88,9 +92,9 @@ public class OParenthesisExpression extends OMathExpression {
   }
 
   @Override
-  public boolean isEarlyCalculated() {
+  public boolean isEarlyCalculated(OCommandContext ctx) {
     // TODO implement query execution and early calculation;
-    return expression != null && expression.isEarlyCalculated();
+    return expression != null && expression.isEarlyCalculated(ctx);
   }
 
   public boolean needsAliases(Set<String> aliases) {
@@ -121,10 +125,10 @@ public class OParenthesisExpression extends OMathExpression {
     return false;
   }
 
-  public SimpleNode splitForAggregation(AggregateProjectionSplit aggregateProj) {
+  public SimpleNode splitForAggregation(AggregateProjectionSplit aggregateProj, OCommandContext ctx) {
     if (isAggregate()) {
       OParenthesisExpression result = new OParenthesisExpression(-1);
-      result.expression = expression.splitForAggregation(aggregateProj);
+      result.expression = expression.splitForAggregation(aggregateProj, ctx);
       return result;
     } else {
       return this;

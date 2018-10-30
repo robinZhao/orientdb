@@ -7,13 +7,24 @@ import com.orientechnologies.common.util.OSizeable;
 import com.orientechnologies.orient.core.command.OCommandContext;
 import com.orientechnologies.orient.core.db.ODatabaseDocumentInternal;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
-import com.orientechnologies.orient.core.index.*;
+import com.orientechnologies.orient.core.index.OCompositeIndexDefinition;
+import com.orientechnologies.orient.core.index.OCompositeKey;
+import com.orientechnologies.orient.core.index.OIndex;
+import com.orientechnologies.orient.core.index.OIndexDefinition;
+import com.orientechnologies.orient.core.index.OPropertyIndexDefinition;
 import com.orientechnologies.orient.core.metadata.schema.OClass;
 import com.orientechnologies.orient.core.metadata.schema.OType;
 import com.orientechnologies.orient.core.sql.executor.OResult;
 import com.orientechnologies.orient.core.sql.executor.OResultInternal;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 public class OWhereClause extends SimpleNode {
@@ -99,6 +110,10 @@ public class OWhereClause extends SimpleNode {
         Map<String, Object> conditions = getEqualityOperations(condition, ctx);
 
         for (OIndex index : indexes) {
+          if (index.getType().equals(OClass.INDEX_TYPE.FULLTEXT.name()) || index.getType()
+              .equals(OClass.INDEX_TYPE.FULLTEXT_HASH_INDEX.name())) {
+            continue;
+          }
           List<String> indexedFields = index.getDefinition().getFields();
           int nMatchingKeys = 0;
           for (String indexedField : indexedFields) {
@@ -269,7 +284,7 @@ public class OWhereClause extends SimpleNode {
       if (expression instanceof OBinaryCondition) {
         OBinaryCondition b = (OBinaryCondition) expression;
         if (b.operator instanceof OEqualsCompareOperator) {
-          if (b.left.isBaseIdentifier() && b.right.isEarlyCalculated()) {
+          if (b.left.isBaseIdentifier() && b.right.isEarlyCalculated(ctx)) {
             result.put(b.left.toString(), b.right.execute((OResult) null, ctx));
           }
         }

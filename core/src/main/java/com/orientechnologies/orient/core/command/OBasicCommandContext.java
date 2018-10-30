@@ -54,6 +54,8 @@ public class OBasicCommandContext implements OCommandContext {
 
   protected Map<Object, Object> inputParameters;
 
+  protected Set<String> declaredScriptVariables = new HashSet<>();
+
   // MANAGES THE TIMEOUT
   private long                                                                       executionStartedOn;
   private long                                                                       timeoutMs;
@@ -397,5 +399,27 @@ public class OBasicCommandContext implements OCommandContext {
 
   public void setDatabase(ODatabase database) {
     this.database = database;
+  }
+
+  @Override
+  public void declareScriptVariable(String varName) {
+    this.declaredScriptVariables.add(varName);
+  }
+
+  @Override
+  public boolean isScriptVariableDeclared(String varName) {
+    if (varName == null || varName.length() == 0) {
+      return false;
+    }
+    String dollarVar = varName;
+    if (!dollarVar.startsWith("$")) {
+      dollarVar = "$" + varName;
+    }
+    varName = dollarVar.substring(1);
+    if (variables != null && (variables.containsKey(varName) || variables.containsKey(dollarVar))) {
+      return true;
+    }
+    return declaredScriptVariables.contains(varName) || declaredScriptVariables.contains(dollarVar) || (parent != null && parent
+        .isScriptVariableDeclared(varName));
   }
 }

@@ -64,6 +64,9 @@ public class OTransactionPhase2Task extends OAbstractReplicatedTask {
     }
     this.success = in.readBoolean();
     this.lastLSN = new OLogSequenceNumber(in);
+    if (lastLSN.getSegment() == -1 && lastLSN.getSegment() == -1) {
+      lastLSN = null;
+    }
   }
 
   @Override
@@ -75,14 +78,18 @@ public class OTransactionPhase2Task extends OAbstractReplicatedTask {
       out.writeInt(involvedCluster);
     }
     out.writeBoolean(success);
-    lastLSN.toStream(out);
+    if (lastLSN == null) {
+      new OLogSequenceNumber(-1, -1).toStream(out);
+    } else {
+      lastLSN.toStream(out);
+    }
   }
 
   @Override
   public Object execute(ODistributedRequestId requestId, OServer iServer, ODistributedServerManager iManager,
       ODatabaseDocumentInternal database) throws Exception {
     if (success) {
-      if (!((ODatabaseDocumentDistributed) database).commit2pc(transactionId)) {
+      if (!((ODatabaseDocumentDistributed) database).commit2pc(transactionId, false)) {
         retryCount++;
         if (retryCount < database.getConfiguration().getValueAsInteger(DISTRIBUTED_CONCURRENT_TX_MAX_AUTORETRY)) {
           OLogManager.instance()

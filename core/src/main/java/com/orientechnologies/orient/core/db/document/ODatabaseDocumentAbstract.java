@@ -253,13 +253,7 @@ public abstract class ODatabaseDocumentAbstract extends OListenerManger<ODatabas
   }
 
   public <REC extends ORecord> ORecordIteratorCluster<REC> browseCluster(final String iClusterName, final Class<REC> iClass) {
-    checkSecurity(ORule.ResourceGeneric.CLUSTER, ORole.PERMISSION_READ, iClusterName);
-
-    checkIfActive();
-
-    final int clusterId = getClusterIdByName(iClusterName);
-
-    return new ORecordIteratorCluster<REC>(this, this, clusterId);
+    return (ORecordIteratorCluster<REC>) browseCluster(iClusterName);
   }
 
   /**
@@ -274,7 +268,7 @@ public abstract class ODatabaseDocumentAbstract extends OListenerManger<ODatabas
 
     final int clusterId = getClusterIdByName(iClusterName);
 
-    return new ORecordIteratorCluster<REC>(this, this, clusterId, startClusterPosition, endClusterPosition, loadTombstones,
+    return new ORecordIteratorCluster<REC>(this, clusterId, startClusterPosition, endClusterPosition,
         OStorage.LOCKING_STRATEGY.DEFAULT);
   }
 
@@ -286,7 +280,7 @@ public abstract class ODatabaseDocumentAbstract extends OListenerManger<ODatabas
 
     final int clusterId = getClusterIdByName(iClusterName);
 
-    return new ORecordIteratorCluster<REC>(this, this, clusterId, startClusterPosition, endClusterPosition);
+    return new ORecordIteratorCluster<REC>(this, clusterId, startClusterPosition, endClusterPosition);
   }
 
   /**
@@ -1703,8 +1697,7 @@ public abstract class ODatabaseDocumentAbstract extends OListenerManger<ODatabas
     if (cl == null || !cl.isEdgeType()) {
       throw new IllegalArgumentException("" + type + " is not an edge class");
     }
-    ODocument doc = new OEdgeDocument(cl);
-    return addEdgeInternal(from, to, type);
+    return addEdgeInternal(from, to, type, false);
   }
 
   @Override
@@ -1715,7 +1708,8 @@ public abstract class ODatabaseDocumentAbstract extends OListenerManger<ODatabas
     return newEdge(from, to, type.getName());
   }
 
-  private OEdge addEdgeInternal(final OVertex currentVertex, final OVertex inVertex, String iClassName, final Object... fields) {
+  private OEdge addEdgeInternal(final OVertex currentVertex, final OVertex inVertex, String iClassName, boolean forceRegular,
+      final Object... fields) {
     if (currentVertex == null)
       throw new IllegalArgumentException("To vertex is null");
     if (inVertex == null)
@@ -1777,7 +1771,7 @@ public abstract class ODatabaseDocumentAbstract extends OListenerManger<ODatabas
 
         // CREATE THE EDGE DOCUMENT TO STORE FIELDS TOO
 
-        if (isUseLightweightEdges() && (fields == null || fields.length == 0)) {
+        if (isUseLightweightEdges() && (fields == null || fields.length == 0) && !forceRegular) {
           edge = newLightweightEdge(iClassName, from, to);
           OVertexDelegate.createLink(from.getRecord(), to.getRecord(), outFieldName);
           OVertexDelegate.createLink(to.getRecord(), from.getRecord(), inFieldName);
@@ -1880,7 +1874,7 @@ public abstract class ODatabaseDocumentAbstract extends OListenerManger<ODatabas
       throw new IllegalArgumentException("Class '" + iClassName + "' not found in current database");
 
     checkSecurity(ORule.ResourceGeneric.CLASS, ORole.PERMISSION_READ, iClassName);
-    return new ORecordIteratorClass<ODocument>(this, this, iClassName, iPolymorphic, false);
+    return new ORecordIteratorClass<ODocument>(this, iClassName, iPolymorphic, false);
   }
 
   /**
@@ -1890,7 +1884,7 @@ public abstract class ODatabaseDocumentAbstract extends OListenerManger<ODatabas
   public ORecordIteratorCluster<ODocument> browseCluster(final String iClusterName) {
     checkSecurity(ORule.ResourceGeneric.CLUSTER, ORole.PERMISSION_READ, iClusterName);
 
-    return new ORecordIteratorCluster<ODocument>(this, this, getClusterIdByName(iClusterName));
+    return new ORecordIteratorCluster<ODocument>(this, getClusterIdByName(iClusterName));
   }
 
   /**
@@ -1910,8 +1904,8 @@ public abstract class ODatabaseDocumentAbstract extends OListenerManger<ODatabas
       boolean loadTombstones) {
     checkSecurity(ORule.ResourceGeneric.CLUSTER, ORole.PERMISSION_READ, iClusterName);
 
-    return new ORecordIteratorCluster<ODocument>(this, this, getClusterIdByName(iClusterName), startClusterPosition,
-        endClusterPosition, loadTombstones, OStorage.LOCKING_STRATEGY.DEFAULT);
+    return new ORecordIteratorCluster<ODocument>(this, getClusterIdByName(iClusterName), startClusterPosition, endClusterPosition,
+        OStorage.LOCKING_STRATEGY.DEFAULT);
   }
 
   /**
@@ -2413,7 +2407,7 @@ public abstract class ODatabaseDocumentAbstract extends OListenerManger<ODatabas
   }
 
   @Override
-  public String incrementalBackup(final String path) {
+  public String incrementalBackup(final String path) throws UnsupportedOperationException {
     checkOpenness();
     checkIfActive();
 
@@ -2710,6 +2704,14 @@ public abstract class ODatabaseDocumentAbstract extends OListenerManger<ODatabas
     return result;
   }
 
+  public OEdge newRegularEdge(String iClassName, OVertex from, OVertex to) {
+    OClass cl = getClass(iClassName);
+    if (cl == null || !cl.isEdgeType()) {
+      throw new IllegalArgumentException("" + iClassName + " is not an edge class");
+    }
+    return addEdgeInternal(from, to, iClassName, true);
+  }
+
   public synchronized void queryStarted(String id, OResultSet rs) {
     if (this.activeQueries.size() > 1 && this.activeQueries.size() % 10 == 0) {
       StringBuilder msg = new StringBuilder();
@@ -2750,7 +2752,7 @@ public abstract class ODatabaseDocumentAbstract extends OListenerManger<ODatabas
 
   @Override
   public boolean isClusterEdge(int cluster) {
-    OClass clazz = getMetadata().getSchema().getClassByClusterId(cluster);
+    OClass clazz = getMetadata().getImmutableSchemaSnapshot().getClassByClusterId(cluster);
     if (clazz != null && clazz.isEdgeType())
       return true;
     return false;
@@ -2758,7 +2760,7 @@ public abstract class ODatabaseDocumentAbstract extends OListenerManger<ODatabas
 
   @Override
   public boolean isClusterVertex(int cluster) {
-    OClass clazz = getMetadata().getSchema().getClassByClusterId(cluster);
+    OClass clazz = getMetadata().getImmutableSchemaSnapshot().getClassByClusterId(cluster);
     if (clazz != null && clazz.isVertexType())
       return true;
     return false;

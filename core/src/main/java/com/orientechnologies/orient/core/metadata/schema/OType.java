@@ -25,39 +25,26 @@ import com.orientechnologies.common.io.OIOUtils;
 import com.orientechnologies.common.log.OLogManager;
 import com.orientechnologies.common.types.OBinary;
 import com.orientechnologies.orient.core.db.ODatabaseRecordThreadLocal;
-import com.orientechnologies.orient.core.db.record.OIdentifiable;
-import com.orientechnologies.orient.core.db.record.ORecordLazyList;
-import com.orientechnologies.orient.core.db.record.ORecordLazyMap;
-import com.orientechnologies.orient.core.db.record.ORecordLazySet;
-import com.orientechnologies.orient.core.db.record.OTrackedList;
-import com.orientechnologies.orient.core.db.record.OTrackedMap;
-import com.orientechnologies.orient.core.db.record.OTrackedSet;
+import com.orientechnologies.orient.core.db.record.*;
 import com.orientechnologies.orient.core.db.record.ridbag.ORidBag;
 import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.id.ORecordId;
+import com.orientechnologies.orient.core.record.OElement;
 import com.orientechnologies.orient.core.record.impl.ODocument;
 import com.orientechnologies.orient.core.serialization.ODocumentSerializable;
 import com.orientechnologies.orient.core.serialization.OSerializableStream;
 import com.orientechnologies.orient.core.serialization.serializer.OStringSerializerHelper;
+import com.orientechnologies.orient.core.sql.executor.OResult;
 
 import java.io.Serializable;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.text.ParseException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 /**
- * Generic representation of a type.<br>
- * allowAssignmentFrom accepts any class, but Array.class means that the type accepts generic Arrays.
+ * Generic representation of a type.<br> allowAssignmentFrom accepts any class, but Array.class means that the type accepts generic
+ * Arrays.
  *
  * @author Luca Garulli (l.garulli--(at)--orientdb.com)
  */
@@ -189,6 +176,7 @@ public enum OType {
   public static OType getById(final byte iId) {
     if (iId >= 0 && iId < TYPES_BY_ID.length)
       return TYPES_BY_ID[iId];
+    OLogManager.instance().warn(OType.class, "Invalid type index: " + iId, (Object[])null);
     return null;
   }
 
@@ -306,7 +294,7 @@ public enum OType {
    * @return The converted value or the original if no conversion was applied
    */
   @SuppressWarnings({ "unchecked", "rawtypes" })
-  public static Object convert(final Object iValue, final Class<?> iTargetClass) {
+  public static Object convert(Object iValue, final Class<?> iTargetClass) {
     if (iValue == null)
       return null;
 
@@ -457,8 +445,12 @@ public enum OType {
           }
         }
       } else if (iTargetClass.equals(String.class)) {
+        if (iValue instanceof Collection && ((Collection) iValue).size() == 1 && ((Collection) iValue).iterator()
+            .next() instanceof String) {
+          return ((Collection) iValue).iterator().next();
+        }
         return iValue.toString();
-      } else if (iTargetClass.equals(OIdentifiable.class)) {
+      } else if (OIdentifiable.class.isAssignableFrom(iTargetClass)) {
         if (OMultiValue.isMultiValue(iValue)) {
           List<OIdentifiable> result = new ArrayList<OIdentifiable>();
           for (Object o : OMultiValue.getMultiValueIterable(iValue)) {
@@ -486,6 +478,19 @@ public enum OType {
       // PASS THROUGH
       throw e;
     } catch (Exception e) {
+      if (iValue instanceof Collection && ((Collection) iValue).size() == 1 && !Collection.class.isAssignableFrom(iTargetClass)) {
+        //this must be a comparison with the result of a subquery, try to unbox the collection
+        return convert(((Collection) iValue).iterator().next(), iTargetClass);
+      } else if (iValue instanceof OResult && ((OResult) iValue).getPropertyNames().size() == 1 && !OResult.class
+          .isAssignableFrom(iTargetClass)) {
+        // try to unbox OResult with a single property, for subqueries
+        return convert(((OResult) iValue).getProperty(((OResult) iValue).getPropertyNames().iterator().next()), iTargetClass);
+      } else if (iValue instanceof OElement && ((OElement) iValue).getPropertyNames().size() == 1 && !OElement.class
+          .isAssignableFrom(iTargetClass)) {
+        // try to unbox OResult with a single property, for subqueries
+        return convert(((OElement) iValue).getProperty(((OElement) iValue).getPropertyNames().iterator().next()), iTargetClass);
+      }
+
       OLogManager.instance().debug(OType.class, "Error in conversion of value '%s' to type '%s'", e, iValue, iTargetClass);
       return null;
     }

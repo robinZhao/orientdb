@@ -30,6 +30,9 @@ public class OLetStatement extends OSimpleExecStatement {
       result = expression.execute((OResult) null, ctx);
     } else {
       Map<Object, Object> params = ctx.getInputParameters();
+      if (statement.originalStatement == null) {
+        statement.setOriginalStatement(statement.toString());
+      }
       result = statement.execute(ctx.getDatabase(), params, ctx);
     }
     if (result instanceof OResultSet) {
@@ -97,6 +100,10 @@ public class OLetStatement extends OSimpleExecStatement {
     result = 31 * result + (statement != null ? statement.hashCode() : 0);
     result = 31 * result + (expression != null ? expression.hashCode() : 0);
     return result;
+  }
+
+  public OIdentifier getName() {
+    return name;
   }
 }
 /* JavaCC - OriginalChecksum=cc646e5449351ad9ced844f61b687928 (do not edit this line) */

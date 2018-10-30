@@ -15,6 +15,7 @@ import com.orientechnologies.orient.core.db.*;
 import com.orientechnologies.orient.core.db.document.ODatabaseDocumentEmbedded;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
 import com.orientechnologies.orient.core.db.record.ORecordOperation;
+import com.orientechnologies.orient.core.enterprise.OEnterpriseEndpoint;
 import com.orientechnologies.orient.core.exception.*;
 import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.id.ORecordId;
@@ -44,7 +45,6 @@ import com.orientechnologies.orient.server.distributed.impl.metadata.OSharedCont
 import com.orientechnologies.orient.server.distributed.impl.task.OCopyDatabaseChunkTask;
 import com.orientechnologies.orient.server.distributed.impl.task.ORunQueryExecutionPlanTask;
 import com.orientechnologies.orient.server.distributed.impl.task.OSyncClusterTask;
-import com.orientechnologies.orient.server.distributed.impl.task.OTransactionPhase2Task;
 import com.orientechnologies.orient.server.distributed.task.ODistributedLockException;
 import com.orientechnologies.orient.server.distributed.task.ORemoteTask;
 import com.orientechnologies.orient.server.hazelcast.OHazelcastPlugin;
@@ -57,9 +57,7 @@ import java.util.*;
 import java.util.concurrent.Callable;
 
 import static com.orientechnologies.orient.core.config.OGlobalConfiguration.DISTRIBUTED_CONCURRENT_TX_MAX_AUTORETRY;
-import static com.orientechnologies.orient.server.distributed.impl.ONewDistributedTxContextImpl.Status.FAILED;
-import static com.orientechnologies.orient.server.distributed.impl.ONewDistributedTxContextImpl.Status.SUCCESS;
-import static com.orientechnologies.orient.server.distributed.impl.ONewDistributedTxContextImpl.Status.TIMEDOUT;
+import static com.orientechnologies.orient.server.distributed.impl.ONewDistributedTxContextImpl.Status.*;
 
 /**
  * Created by tglman on 30/03/17.
@@ -611,6 +609,10 @@ public class ODatabaseDocumentDistributed extends ODatabaseDocumentEmbedded {
       txContext.setStatus(FAILED);
       getStorageDistributed().getLocalDistributedDatabase().registerTxContext(requestId, txContext);
       throw ex;
+    } catch (OLowDiskSpaceException ex) {
+      getStorageDistributed().getDistributedManager()
+          .setDatabaseStatus(getLocalNodeName(), getName(), ODistributedServerManager.DB_STATUS.OFFLINE);
+      throw ex;
     }
     getStorageDistributed().getLocalDistributedDatabase().registerTxContext(requestId, txContext);
     return true;
@@ -622,10 +624,10 @@ public class ODatabaseDocumentDistributed extends ODatabaseDocumentEmbedded {
    * @param transactionId
    */
   public void commit2pcLocal(ODistributedRequestId transactionId) {
-    commit2pc(transactionId);
+    commit2pc(transactionId, true);
   }
 
-  public boolean commit2pc(ODistributedRequestId transactionId) {
+  public boolean commit2pc(ODistributedRequestId transactionId, boolean local) {
     getStorageDistributed().resetLastValidBackup();
     ODistributedDatabase localDistributedDatabase = getStorageDistributed().getLocalDistributedDatabase();
     ODistributedServerManager manager = getStorageDistributed().getDistributedManager();
@@ -645,7 +647,7 @@ public class ODatabaseDocumentDistributed extends ODatabaseDocumentEmbedded {
       } else if (TIMEDOUT.equals(txContext.getStatus())) {
         for (int i = 0; i < 10; i++) {
           try {
-            internalBegin2pc(txContext, false);
+            internalBegin2pc(txContext, local);
             txContext.setStatus(SUCCESS);
             break;
           } catch (Exception ex) {
@@ -701,6 +703,10 @@ public class ODatabaseDocumentDistributed extends ODatabaseDocumentEmbedded {
     try {
       OTransactionInternal tx = txContext.getTransaction();
       ((OAbstractPaginatedStorage) this.getStorage().getUnderlying()).commitPreAllocated(tx);
+    } catch (OLowDiskSpaceException ex) {
+      getStorageDistributed().getDistributedManager()
+          .setDatabaseStatus(getLocalNodeName(), getName(), ODistributedServerManager.DB_STATUS.OFFLINE);
+      throw ex;
     } finally {
       txContext.destroy();
     }
@@ -722,7 +728,7 @@ public class ODatabaseDocumentDistributed extends ODatabaseDocumentEmbedded {
     }
 
     for (Map.Entry<String, OTransactionIndexChanges> change : transaction.getIndexOperations().entrySet()) {
-      OIndex<?> index = getMetadata().getIndexManager().getIndex(change.getKey());
+      OIndex<?> index = getSharedContext().getIndexManager().getRawIndex(change.getKey());
       if (OClass.INDEX_TYPE.UNIQUE.name().equals(index.getType()) || OClass.INDEX_TYPE.UNIQUE_HASH_INDEX.name()
           .equals(index.getType())) {
         if (!change.getValue().nullKeyChanges.entries.isEmpty()) {
@@ -770,4 +776,10 @@ public class ODatabaseDocumentDistributed extends ODatabaseDocumentEmbedded {
 
   }
 
+  @Override
+  public OEnterpriseEndpoint getEnterpriseEndpoint() {
+    OServer server = ((ODistributedStorage) getStorage()).getDistributedManager().getServerInstance();
+    return server.getPlugins().stream().filter(OEnterpriseEndpoint.class::isInstance).findFirst()
+        .map(OEnterpriseEndpoint.class::cast).orElse(null);
+  }
 }

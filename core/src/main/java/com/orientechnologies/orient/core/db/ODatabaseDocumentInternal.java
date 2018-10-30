@@ -163,6 +163,8 @@ public interface ODatabaseDocumentInternal extends ODatabaseSession, ODatabaseIn
 
   OEdge newLightweightEdge(String iClassName, OVertex from, OVertex to);
 
+  OEdge newRegularEdge(String iClassName, OVertex from, OVertex to);
+
   void setUseLightweightEdges(boolean b);
 
   /**
@@ -250,4 +252,7 @@ public interface ODatabaseDocumentInternal extends ODatabaseSession, ODatabaseIn
 
   void internalClose(boolean recycle);
 
+  default OResultSet indexQuery(String indexName, String query, Object... args) {
+    return command(query, args);
+  }
 }

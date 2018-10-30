@@ -97,8 +97,8 @@ public class ODistributedStorage implements OStorage, OFreezableStorageComponent
   private ODistributedStorageEventListener           eventListener;
 
   private volatile ODistributedConfiguration distributedConfiguration;
-  private volatile boolean running         = true;
-  private volatile File    lastValidBackup = null;
+  private volatile boolean                   running         = false;
+  private volatile OBackgroundBackup         lastValidBackup = null;
 
   public ODistributedStorage(final OServer iServer, final String dbName) {
     this.serverInstance = iServer;
@@ -135,8 +135,7 @@ public class ODistributedStorage implements OStorage, OFreezableStorageComponent
   }
 
   /**
-   * Supported only in embedded storage.
-   * Use <code>SELECT FROM metadata:storage</code> instead.
+   * Supported only in embedded storage. Use <code>SELECT FROM metadata:storage</code> instead.
    */
   @Override
   public String getCreatedAtVersion() {
@@ -1665,11 +1664,11 @@ public class ODistributedStorage implements OStorage, OFreezableStorageComponent
           "Cannot execute write operation (" + operation + ") on node '" + localNodeName + "' because is non a master");
   }
 
-  public File getLastValidBackup() {
+  public OBackgroundBackup getLastValidBackup() {
     return lastValidBackup;
   }
 
-  public void setLastValidBackup(final File lastValidBackup) {
+  public void setLastValidBackup(final OBackgroundBackup lastValidBackup) {
     this.lastValidBackup = lastValidBackup;
   }
 
@@ -1765,9 +1764,14 @@ public class ODistributedStorage implements OStorage, OFreezableStorageComponent
   }
 
   protected void dropStorageFiles() {
+    dropStorageFiles(wrapped);
+
+  }
+
+  public static void dropStorageFiles(OAbstractPaginatedStorage wrapped) {
     // REMOVE distributed-config.json and distributed-sync.json files to allow removal of directory
     final File dCfg = new File(
-        ((OLocalPaginatedStorage) wrapped).getStoragePath() + "/" + getDistributedManager().FILE_DISTRIBUTED_DB_CONFIG);
+        ((OLocalPaginatedStorage) wrapped).getStoragePath() + "/" + ODistributedServerManager.FILE_DISTRIBUTED_DB_CONFIG);
 
     try {
       if (dCfg.exists()) {

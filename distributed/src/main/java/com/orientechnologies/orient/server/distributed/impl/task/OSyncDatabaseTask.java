@@ -21,10 +21,9 @@ package com.orientechnologies.orient.server.distributed.impl.task;
 
 import com.orientechnologies.common.concur.lock.OLockException;
 import com.orientechnologies.common.io.OFileUtils;
-import com.orientechnologies.common.log.OLogManager;
+import com.orientechnologies.common.types.OModifiableBoolean;
 import com.orientechnologies.common.util.OUncaughtExceptionHandler;
 import com.orientechnologies.orient.core.Orient;
-import com.orientechnologies.orient.core.command.OCommandOutputListener;
 import com.orientechnologies.orient.core.config.OGlobalConfiguration;
 import com.orientechnologies.orient.core.db.ODatabaseDocumentInternal;
 import com.orientechnologies.orient.core.storage.impl.local.OAbstractPaginatedStorage;
@@ -36,9 +35,8 @@ import com.orientechnologies.orient.server.distributed.impl.ODistributedDatabase
 import com.orientechnologies.orient.server.distributed.impl.ODistributedStorage;
 
 import java.io.*;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.util.concurrent.Callable;
+import java.util.Arrays;
+import java.util.Random;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -87,11 +85,12 @@ public class OSyncDatabaseTask extends OAbstractSyncDatabaseTask {
 
         final AtomicReference<ODistributedMomentum> momentum = new AtomicReference<ODistributedMomentum>();
 
-        File backupFile = ((ODistributedStorage) database.getStorage()).getLastValidBackup();
-
-        if (backupFile == null || !backupFile.exists()) {
+        OBackgroundBackup backup = ((ODistributedStorage) database.getStorage()).getLastValidBackup();
+        if (backup == null || !backup.getResultedBackupFile().exists()) {
           // CREATE A BACKUP OF DATABASE FROM SCRATCH
-          backupFile = new File(Orient.getTempPath() + "/backup_" + database.getName() + ".zip");
+          int nameRandom = new Random().nextInt(1000);
+          File backupFile = new File(Orient.getTempPath() + "/backup_" + database.getName() + nameRandom + ".zip");
+          String backupPath = backupFile.getAbsolutePath();
 
           final int compressionRate = OGlobalConfiguration.DISTRIBUTED_DEPLOYDB_TASK_COMPRESSION.getValueAsInteger();
 
@@ -102,7 +101,6 @@ public class OSyncDatabaseTask extends OAbstractSyncDatabaseTask {
           backupFile.createNewFile();
 
           final File resultedBackupFile = backupFile;
-          final FileOutputStream fileOutputStream = new FileOutputStream(resultedBackupFile);
 
           final File completedFile = new File(backupFile.getAbsolutePath() + ".completed");
           if (completedFile.exists())
@@ -110,91 +108,49 @@ public class OSyncDatabaseTask extends OAbstractSyncDatabaseTask {
 
           ODistributedServerLog.info(this, iManager.getLocalNodeName(), getNodeSource(), DIRECTION.OUT,
               "Creating backup of database '%s' (compressionRate=%d) in directory: %s...", databaseName, compressionRate,
-              backupFile.getAbsolutePath());
+              backupPath);
 
-          Thread t = new Thread(new Runnable() {
-            @Override
-            public void run() {
-              Thread.currentThread().setName("OrientDB SyncDatabase node=" + iManager.getLocalNodeName() + " db=" + databaseName);
-
-              try {
-                try {
-                  database.activateOnCurrentThread();
-
-                  ODistributedServerLog.info(this, iManager.getLocalNodeName(), getNodeSource(), DIRECTION.OUT,
-                      "Compressing database '%s' %d clusters %s...", databaseName, database.getClusterNames().size(),
-                      database.getClusterNames());
-
-                  database.backup(fileOutputStream, null, new Callable<Object>() {
-                    @Override
-                    public Object call() throws Exception {
-                      momentum.set(dDatabase.getSyncConfiguration().getMomentum().copy());
-                      return null;
-                    }
-                  }, ODistributedServerLog.isDebugEnabled() ? new OCommandOutputListener() {
-                    @Override
-                    public void onMessage(String iText) {
-                      if (iText.startsWith("\n"))
-                        iText = iText.substring(1);
-
-                      OLogManager.instance().debug(this, iText);
-                    }
-                  } : null, OGlobalConfiguration.DISTRIBUTED_DEPLOYDB_TASK_COMPRESSION.getValueAsInteger(), CHUNK_MAX_SIZE);
-
-                  ODistributedServerLog.info(this, iManager.getLocalNodeName(), getNodeSource(), DIRECTION.OUT,
-                      "Backup of database '%s' completed. lastOperationId=%s...", databaseName, requestId);
-
-                } catch (Exception e) {
-                  OLogManager.instance().error(this, "Cannot execute backup of database '%s' for deploy database", e, databaseName);
-                  throw e;
-                } finally {
-                  try {
-                    fileOutputStream.close();
-                  } catch (IOException e) {
-                  }
-
-                  try {
-                    completedFile.createNewFile();
-                  } catch (IOException e) {
-                    OLogManager.instance().error(this, "Cannot create file of backup completed: %s", e, completedFile);
-                  }
-                }
-              } catch (Exception e) {
-                OLogManager.instance()
-                    .errorNoDb(this, "Error during backup processing, file %s will be deleted\n", e, resultedBackupFile);
-                try {
-                  Files.deleteIfExists(Paths.get(resultedBackupFile.getAbsolutePath()));
-                } catch (IOException ioe) {
-                  OLogManager.instance().errorNoDb(this, "Can not delete file %s\n", ioe, resultedBackupFile);
-                }
-              }
-
-            }
-          });
+          backup = new OBackgroundBackup(this, iManager, database, resultedBackupFile, backupPath, null, momentum, dDatabase,
+              requestId, completedFile);
+          Thread t = new Thread(backup);
           t.setUncaughtExceptionHandler(new OUncaughtExceptionHandler());
           t.start();
 
           // RECORD LAST BACKUP TO BE REUSED IN CASE ANOTHER NODE ASK FOR THE SAME IN SHORT TIME WHILE THE DB IS NOT UPDATED
-          ((ODistributedStorage) database.getStorage()).setLastValidBackup(backupFile);
+          ((ODistributedStorage) database.getStorage()).setLastValidBackup(backup);
 
         } else {
           momentum.set(dDatabase.getSyncConfiguration().getMomentum().copy());
           ODistributedServerLog.info(this, iManager.getLocalNodeName(), getNodeSource(), DIRECTION.OUT,
-              "Reusing last backup of database '%s' in directory: %s...", databaseName, backupFile.getAbsolutePath());
+              "Reusing last backup of database '%s' in directory: %s...", databaseName,
+              backup.getResultedBackupFile().getAbsolutePath());
         }
 
         for (int retry = 0; momentum.get() == null && retry < 10; ++retry)
           Thread.sleep(300);
 
-        final ODistributedDatabaseChunk chunk = new ODistributedDatabaseChunk(backupFile, 0, CHUNK_MAX_SIZE, momentum.get(), false);
+        File backupFile = new File(backup.getFinalBackupPath());
+        if (backup.getIncremental().get()) {
+          backupFile = backupFile.listFiles(pathname -> pathname.getName().endsWith(".ibu"))[0];
+        }
+
+        final ODistributedDatabaseChunk chunk = new ODistributedDatabaseChunk(backupFile, 0, CHUNK_MAX_SIZE, momentum.get(), false,
+            backup.getIncremental().get());
 
         ODistributedServerLog.info(this, iManager.getLocalNodeName(), getNodeSource(), ODistributedServerLog.DIRECTION.OUT,
             "- transferring chunk #%d offset=%d size=%s lsn=%s...", 1, 0, OFileUtils.getSizeAsNumber(chunk.buffer.length),
             momentum.get());
 
-        if (chunk.last)
+        if (chunk.last) {
           // NO MORE CHUNKS: SET THE NODE ONLINE (SYNCHRONIZING ENDED)
           iManager.setDatabaseStatus(iManager.getLocalNodeName(), databaseName, ODistributedServerManager.DB_STATUS.ONLINE);
+          if (backup.getIncremental().get()) {
+            File dir = backupFile.getParentFile();
+            Arrays.stream(dir.listFiles()).forEach(x -> x.delete());
+            dir.delete();
+          }
+
+        }
 
         return chunk;
 
@@ -260,4 +216,5 @@ public class OSyncDatabaseTask extends OAbstractSyncDatabaseTask {
   public int getFactoryId() {
     return FACTORYID;
   }
+
 }

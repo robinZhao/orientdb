@@ -10,7 +10,12 @@ import com.orientechnologies.orient.core.sql.executor.AggregationContext;
 import com.orientechnologies.orient.core.sql.executor.OResult;
 import com.orientechnologies.orient.core.sql.executor.OResultInternal;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 public class OArrayConcatExpression extends SimpleNode {
@@ -100,9 +105,9 @@ public class OArrayConcatExpression extends SimpleNode {
     return result;
   }
 
-  public boolean isEarlyCalculated() {
+  public boolean isEarlyCalculated(OCommandContext ctx) {
     for (OArrayConcatExpressionElement element : childExpressions) {
-      if (!element.isEarlyCalculated()) {
+      if (!element.isEarlyCalculated(ctx)) {
         return false;
       }
     }

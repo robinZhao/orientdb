@@ -113,7 +113,7 @@ public class OProjectionItem extends SimpleNode {
     return convert(result);
   }
 
-  private Object convert(Object value) {
+  public Object convert(Object value) {
     if (value instanceof ORidBag) {
       List result = new ArrayList();
       ((ORidBag) value).forEach(x -> result.add(x));
@@ -162,7 +162,7 @@ public class OProjectionItem extends SimpleNode {
     if (all) {
       result = new OIdentifier("*");
     } else {
-      result = new OIdentifier(expression.toString());
+      result = expression.getDefaultAlias();
     }
     return result;
   }
@@ -198,11 +198,11 @@ public class OProjectionItem extends SimpleNode {
    *
    * @param aggregateSplit
    */
-  public OProjectionItem splitForAggregation(AggregateProjectionSplit aggregateSplit) {
+  public OProjectionItem splitForAggregation(AggregateProjectionSplit aggregateSplit, OCommandContext ctx) {
     if (isAggregate()) {
       OProjectionItem result = new OProjectionItem(-1);
       result.alias = getProjectionAlias();
-      result.expression = expression.splitForAggregation(aggregateSplit);
+      result.expression = expression.splitForAggregation(aggregateSplit, ctx);
       result.nestedProjection = nestedProjection;
       return result;
     } else {

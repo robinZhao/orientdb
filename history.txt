@@ -27,6 +27,36 @@
 This document contains the last changes of OrientDB Community Edition.
 
 -----------------------------------------------------------------------------------------------------------------------------------
+VERSION 3.0.10 - (October, 25 2018)
+- Release Notes: https://github.com/orientechnologies/orientdb/wiki/OrientDB-3.0-Release-Notes#3010---25-october-2018
+- Issues: https://github.com/orientechnologies/orientdb/issues?q=is%3Aissue+milestone%3A3.0.10+is%3Aclosed
+
+-----------------------------------------------------------------------------------------------------------------------------------
+VERSION 3.0.9 - (October, 15 2018)
+- Release Notes: https://github.com/orientechnologies/orientdb/wiki/OrientDB-3.0-Release-Notes#309---15-october-2018
+- Issues: https://github.com/orientechnologies/orientdb/issues?q=is%3Aissue+milestone%3A3.0.9+is%3Aclosed
+
+-----------------------------------------------------------------------------------------------------------------------------------
+VERSION 3.0.8 - (September, 27 2018)
+- Release Notes: https://github.com/orientechnologies/orientdb/wiki/OrientDB-3.0-Release-Notes#308---27-september-2018
+- Issues: https://github.com/orientechnologies/orientdb/issues?q=is%3Aissue+milestone%3A3.0.8+is%3Aclosed
+
+-----------------------------------------------------------------------------------------------------------------------------------
+VERSION 3.0.7 - (September, 6 2018)
+- Release Notes: https://github.com/orientechnologies/orientdb/wiki/OrientDB-3.0-Release-Notes#307---6-september-2018
+- Issues: https://github.com/orientechnologies/orientdb/issues?q=is%3Aissue+milestone%3A3.0.7+is%3Aclosed
+
+-----------------------------------------------------------------------------------------------------------------------------------
+VERSION 3.0.6 - (August, 14 2018)
+- Release Notes: https://github.com/orientechnologies/orientdb/wiki/OrientDB-3.0-Release-Notes#306---14-august-2018
+- Issues: https://github.com/orientechnologies/orientdb/issues?q=is%3Aissue+milestone%3A3.0.6+is%3Aclosed
+
+-----------------------------------------------------------------------------------------------------------------------------------
+VERSION 3.0.5 - (August, 2 2018)
+- Release Notes: https://github.com/orientechnologies/orientdb/wiki/OrientDB-3.0-Release-Notes#305---2-august-2018
+- Issues: https://github.com/orientechnologies/orientdb/issues?q=is%3Aissue+milestone%3A3.0.5+is%3Aclosed
+
+-----------------------------------------------------------------------------------------------------------------------------------
 VERSION 3.0.4 - (July, 12 2018)
 - Release Notes: https://github.com/orientechnologies/orientdb/wiki/OrientDB-3.0-Release-Notes#304---12-july-2018
 - Issues: https://github.com/orientechnologies/orientdb/issues?q=is%3Aissue+milestone%3A3.0.4+is%3Aclosed

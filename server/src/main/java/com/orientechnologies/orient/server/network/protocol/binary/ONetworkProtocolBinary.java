@@ -19,6 +19,7 @@
  */
 package com.orientechnologies.orient.server.network.protocol.binary;
 
+import com.orientechnologies.common.concur.OOfflineNodeException;
 import com.orientechnologies.common.concur.lock.OInterruptedException;
 import com.orientechnologies.common.concur.lock.OLockException;
 import com.orientechnologies.common.exception.OErrorCode;
@@ -28,7 +29,11 @@ import com.orientechnologies.common.log.OLogManager;
 import com.orientechnologies.orient.client.binary.OBinaryRequestExecutor;
 import com.orientechnologies.orient.client.remote.OBinaryRequest;
 import com.orientechnologies.orient.client.remote.OBinaryResponse;
-import com.orientechnologies.orient.client.remote.message.*;
+import com.orientechnologies.orient.client.remote.message.OBinaryProtocolHelper;
+import com.orientechnologies.orient.client.remote.message.OBinaryPushRequest;
+import com.orientechnologies.orient.client.remote.message.OBinaryPushResponse;
+import com.orientechnologies.orient.client.remote.message.OError37Response;
+import com.orientechnologies.orient.client.remote.message.OErrorResponse;
 import com.orientechnologies.orient.core.Orient;
 import com.orientechnologies.orient.core.config.OContextConfiguration;
 import com.orientechnologies.orient.core.config.OGlobalConfiguration;
@@ -51,11 +56,20 @@ import com.orientechnologies.orient.core.serialization.serializer.record.OSerial
 import com.orientechnologies.orient.core.serialization.serializer.record.binary.ORecordSerializerNetworkFactory;
 import com.orientechnologies.orient.core.serialization.serializer.record.string.ORecordSerializerSchemaAware2CSV;
 import com.orientechnologies.orient.core.storage.ridbag.sbtree.OSBTreeCollectionManager;
-import com.orientechnologies.orient.enterprise.channel.binary.*;
+import com.orientechnologies.orient.enterprise.channel.binary.OChannelBinary;
+import com.orientechnologies.orient.enterprise.channel.binary.OChannelBinaryProtocol;
+import com.orientechnologies.orient.enterprise.channel.binary.OChannelBinaryServer;
+import com.orientechnologies.orient.enterprise.channel.binary.ONetworkProtocolException;
+import com.orientechnologies.orient.enterprise.channel.binary.OTokenSecurityException;
 import com.orientechnologies.orient.server.OClientConnection;
 import com.orientechnologies.orient.server.OConnectionBinaryExecutor;
 import com.orientechnologies.orient.server.OServer;
-import com.orientechnologies.orient.server.distributed.*;
+import com.orientechnologies.orient.server.distributed.ODistributedDatabase;
+import com.orientechnologies.orient.server.distributed.ODistributedException;
+import com.orientechnologies.orient.server.distributed.ODistributedRequest;
+import com.orientechnologies.orient.server.distributed.ODistributedResponse;
+import com.orientechnologies.orient.server.distributed.ODistributedServerLog;
+import com.orientechnologies.orient.server.distributed.ODistributedServerManager;
 import com.orientechnologies.orient.server.network.OServerNetworkListener;
 import com.orientechnologies.orient.server.network.protocol.ONetworkProtocol;
 import com.orientechnologies.orient.server.plugin.OServerPluginHelper;
@@ -75,17 +89,17 @@ import java.util.function.Function;
 import java.util.logging.Level;
 
 public class ONetworkProtocolBinary extends ONetworkProtocol {
-  protected final    Level          logClientExceptions;
-  protected final    boolean        logClientFullStackTrace;
-  protected          OChannelBinary channel;
-  protected volatile int            requestType;
-  protected          int            clientTxId;
-  protected          boolean        okSent;
-  private boolean tokenConnection = true;
-  private long    requests        = 0;
-  private          HandshakeInfo       handshakeInfo;
-  private volatile OBinaryPushResponse expectedPushResponse;
-  private BlockingQueue<OBinaryPushResponse> pushResponse = new SynchronousQueue<OBinaryPushResponse>();
+  protected final    Level                              logClientExceptions;
+  protected final    boolean                            logClientFullStackTrace;
+  protected          OChannelBinary                     channel;
+  protected volatile int                                requestType;
+  protected          int                                clientTxId;
+  protected          boolean                            okSent;
+  private            boolean                            tokenConnection = true;
+  private            long                               requests        = 0;
+  private            HandshakeInfo                      handshakeInfo;
+  private volatile   OBinaryPushResponse                expectedPushResponse;
+  private            BlockingQueue<OBinaryPushResponse> pushResponse    = new SynchronousQueue<OBinaryPushResponse>();
 
   private Function<Integer, OBinaryRequest<? extends OBinaryResponse>> factory = ONetworkBinaryProtocolFactory.defaultProtocol();
 
@@ -165,6 +179,12 @@ public class ONetworkProtocolBinary extends ONetworkProtocol {
       if (server.rejectRequests()) {
         // MAKE SURE THAT IF THE SERVER IS GOING DOWN THE CONNECTIONS ARE TERMINATED BEFORE HANDLE ANY OPERATIONS
         this.softShutdown();
+        if (requestType != OChannelBinaryProtocol.REQUEST_HANDSHAKE && isDistributed(requestType)
+            && requestType != OChannelBinaryProtocol.REQUEST_OK_PUSH) {
+          clientTxId = channel.readInt();
+          channel.clearInput();
+          sendError(null, clientTxId, new OOfflineNodeException("Node Shutting down"));
+        }
         return;
       }
 
@@ -604,9 +624,10 @@ public class ONetworkProtocolBinary extends ONetworkProtocol {
             channel.writeBytes(new byte[] {});
         }
       }
-
       final Throwable current;
-      if (t instanceof OLockException && t.getCause() instanceof ODatabaseException)
+      if (t instanceof OException && t.getCause() instanceof InterruptedException && !server.isActive()) {
+        current = new OOfflineNodeException("Node shutting down");
+      } else if (t instanceof OLockException && t.getCause() instanceof ODatabaseException)
         // BYPASS THE DB POOL EXCEPTION TO PROPAGATE THE RIGHT SECURITY ONE
         current = t.getCause();
       else
@@ -737,13 +758,9 @@ public class ONetworkProtocolBinary extends ONetworkProtocol {
   }
 
   /**
-   * Write a OIdentifiable instance using this format:<br>
-   * - 2 bytes: class id [-2=no record, -3=rid, -1=no class id, > -1 = valid] <br>
-   * - 1 byte: record type [d,b,f] <br>
-   * - 2 bytes: cluster id <br>
-   * - 8 bytes: position in cluster <br>
-   * - 4 bytes: record version <br>
-   * - x bytes: record content <br>
+   * Write a OIdentifiable instance using this format:<br> - 2 bytes: class id [-2=no record, -3=rid, -1=no class id, > -1 = valid]
+   * <br> - 1 byte: record type [d,b,f] <br> - 2 bytes: cluster id <br> - 8 bytes: position in cluster <br> - 4 bytes: record
+   * version <br> - x bytes: record content <br>
    *
    * @param channel TODO
    */

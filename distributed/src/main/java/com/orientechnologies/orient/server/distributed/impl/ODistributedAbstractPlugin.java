@@ -40,7 +40,12 @@ import com.orientechnologies.orient.core.OConstants;
 import com.orientechnologies.orient.core.Orient;
 import com.orientechnologies.orient.core.command.OCommandOutputListener;
 import com.orientechnologies.orient.core.config.OGlobalConfiguration;
-import com.orientechnologies.orient.core.db.*;
+import com.orientechnologies.orient.core.db.ODatabaseDocumentInternal;
+import com.orientechnologies.orient.core.db.ODatabaseInternal;
+import com.orientechnologies.orient.core.db.ODatabaseLifecycleListener;
+import com.orientechnologies.orient.core.db.ODatabaseRecordThreadLocal;
+import com.orientechnologies.orient.core.db.OScenarioThreadLocal;
+import com.orientechnologies.orient.core.db.OrientDBConfig;
 import com.orientechnologies.orient.core.db.document.ODatabaseDocument;
 import com.orientechnologies.orient.core.exception.OConfigurationException;
 import com.orientechnologies.orient.core.exception.ODatabaseException;
@@ -63,10 +68,31 @@ import com.orientechnologies.orient.server.config.OServerConfiguration;
 import com.orientechnologies.orient.server.config.OServerHandlerConfiguration;
 import com.orientechnologies.orient.server.config.OServerParameterConfiguration;
 import com.orientechnologies.orient.server.config.OServerUserConfiguration;
-import com.orientechnologies.orient.server.distributed.*;
+import com.orientechnologies.orient.server.distributed.ODistributedConfiguration;
+import com.orientechnologies.orient.server.distributed.ODistributedDatabase;
+import com.orientechnologies.orient.server.distributed.ODistributedException;
+import com.orientechnologies.orient.server.distributed.ODistributedLifecycleListener;
+import com.orientechnologies.orient.server.distributed.ODistributedMessageService;
+import com.orientechnologies.orient.server.distributed.ODistributedMomentum;
+import com.orientechnologies.orient.server.distributed.ODistributedRequest;
+import com.orientechnologies.orient.server.distributed.ODistributedRequestId;
+import com.orientechnologies.orient.server.distributed.ODistributedResponse;
+import com.orientechnologies.orient.server.distributed.ODistributedResponseManager;
+import com.orientechnologies.orient.server.distributed.ODistributedServerLog;
 import com.orientechnologies.orient.server.distributed.ODistributedServerLog.DIRECTION;
+import com.orientechnologies.orient.server.distributed.ODistributedServerManager;
+import com.orientechnologies.orient.server.distributed.ODistributedStrategy;
+import com.orientechnologies.orient.server.distributed.OModifiableDistributedConfiguration;
+import com.orientechnologies.orient.server.distributed.ORemoteServerController;
+import com.orientechnologies.orient.server.distributed.ORemoteTaskFactoryManager;
 import com.orientechnologies.orient.server.distributed.conflict.ODistributedConflictResolverFactory;
-import com.orientechnologies.orient.server.distributed.impl.task.*;
+import com.orientechnologies.orient.server.distributed.impl.task.OCopyDatabaseChunkTask;
+import com.orientechnologies.orient.server.distributed.impl.task.ORemoteTaskFactoryManagerImpl;
+import com.orientechnologies.orient.server.distributed.impl.task.ORestartServerTask;
+import com.orientechnologies.orient.server.distributed.impl.task.OStopServerTask;
+import com.orientechnologies.orient.server.distributed.impl.task.OSyncDatabaseDeltaTask;
+import com.orientechnologies.orient.server.distributed.impl.task.OSyncDatabaseTask;
+import com.orientechnologies.orient.server.distributed.impl.task.OUpdateDatabaseStatusTask;
 import com.orientechnologies.orient.server.distributed.sql.OCommandExecutorSQLHASyncCluster;
 import com.orientechnologies.orient.server.distributed.task.OAbstractReplicatedTask;
 import com.orientechnologies.orient.server.distributed.task.ODatabaseIsOldException;
@@ -75,13 +101,31 @@ import com.orientechnologies.orient.server.distributed.task.ORemoteTask;
 import com.orientechnologies.orient.server.network.OServerNetworkListener;
 import com.orientechnologies.orient.server.plugin.OServerPluginAbstract;
 
-import java.io.*;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TimerTask;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -100,19 +144,19 @@ public abstract class ODistributedAbstractPlugin extends OServerPluginAbstract
   protected static final String PAR_DEF_DISTRIB_DB_CONFIG = "configuration.db.default";
   protected static final String NODE_NAME_ENV             = "ORIENTDB_NODE_NAME";
 
-  protected          OServer                                        serverInstance;
-  protected          String                                         nodeUuid;
-  protected          String                                         nodeName                          = null;
-  protected          int                                            nodeId                            = -1;
-  protected          File                                           defaultDatabaseConfigFile;
-  protected final    ConcurrentMap<String, ODistributedStorage>     storages                          = new ConcurrentHashMap<String, ODistributedStorage>();
-  protected volatile NODE_STATUS                                    status                            = NODE_STATUS.OFFLINE;
-  protected          long                                           lastClusterChangeOn;
-  protected          List<ODistributedLifecycleListener>            listeners                         = new ArrayList<ODistributedLifecycleListener>();
-  protected final    ConcurrentMap<String, ORemoteServerController> remoteServers                     = new ConcurrentHashMap<String, ORemoteServerController>();
-  protected          TimerTask                                      publishLocalNodeConfigurationTask = null;
-  protected          TimerTask                                      haStatsTask                       = null;
-  protected          OClusterHealthChecker                          healthCheckerTask                 = null;
+  protected OServer serverInstance;
+  protected String  nodeUuid;
+  protected String nodeName = null;
+  protected int    nodeId   = -1;
+  protected File defaultDatabaseConfigFile;
+  protected final    ConcurrentMap<String, ODistributedStorage> storages = new ConcurrentHashMap<String, ODistributedStorage>();
+  protected volatile NODE_STATUS                                status   = NODE_STATUS.OFFLINE;
+  protected long lastClusterChangeOn;
+  protected       List<ODistributedLifecycleListener>            listeners                         = new ArrayList<ODistributedLifecycleListener>();
+  protected final ConcurrentMap<String, ORemoteServerController> remoteServers                     = new ConcurrentHashMap<String, ORemoteServerController>();
+  protected       TimerTask                                      publishLocalNodeConfigurationTask = null;
+  protected       TimerTask                                      haStatsTask                       = null;
+  protected       OClusterHealthChecker                          healthCheckerTask                 = null;
 
   // LOCAL MSG COUNTER
   protected AtomicLong                          localMessageIdCounter     = new AtomicLong();
@@ -127,16 +171,16 @@ public abstract class ODistributedAbstractPlugin extends OServerPluginAbstract
   protected              ConcurrentMap<String, Long>    autoRemovalOfServers   = new ConcurrentHashMap<String, Long>();
   protected              Set<String>                    installingDatabases    = Collections
       .newSetFromMap(new ConcurrentHashMap<String, Boolean>());
-  protected volatile     ODistributedMessageServiceImpl messageService;
-  protected              Date                           startedOn              = new Date();
-  protected              ODistributedStrategy           responseManagerFactory = new ODefaultDistributedStrategy();
-  protected              ORemoteTaskFactoryManager      taskFactoryManager     = new ORemoteTaskFactoryManagerImpl(this);
+  protected volatile ODistributedMessageServiceImpl messageService;
+  protected Date                      startedOn              = new Date();
+  protected ODistributedStrategy      responseManagerFactory = new ODefaultDistributedStrategy();
+  protected ORemoteTaskFactoryManager taskFactoryManager     = new ORemoteTaskFactoryManagerImpl(this);
 
   private volatile String                              lastServerDump          = "";
   protected        CountDownLatch                      serverStarted           = new CountDownLatch(1);
   private          ODistributedConflictResolverFactory conflictResolverFactory = new ODistributedConflictResolverFactory();
   private final    ODistributedLockManagerRequester    lockManagerRequester    = new ODistributedLockManagerRequester(this);
-  private          ODistributedLockManagerExecutor     lockManagerExecutor;
+  private ODistributedLockManagerExecutor lockManagerExecutor;
 
   protected ODistributedAbstractPlugin() {
   }
@@ -1017,8 +1061,25 @@ public abstract class ODistributedAbstractPlugin extends OServerPluginAbstract
     OLogSequenceNumber lsn = ((OLocalPaginatedStorage) db.getStorage().getUnderlying()).getLSN();
     if (!nodes.isEmpty()) {
       OUpdateDatabaseStatusTask statusTask = new OUpdateDatabaseStatusTask(db.getName(), DB_STATUS.ONLINE.toString(), lsn);
-      sendRequest(db.getName(), null, nodes, statusTask, getNextMessageIdCounter(), ODistributedRequest.EXECUTION_MODE.RESPONSE,
-          null, null, null);
+      ODistributedResponse result = sendRequest(db.getName(), null, nodes, statusTask, getNextMessageIdCounter(),
+          ODistributedRequest.EXECUTION_MODE.RESPONSE, null, null, null);
+      ODistributedDatabase database1 = getMessageService().getDatabase(db.getName());
+      Map<String, Object> payload = (Map<String, Object>) result.getPayload();
+      if (database1 != null) {
+        for (Map.Entry<String, Object> nodePayload : payload.entrySet()) {
+          if (nodePayload.getValue() instanceof OUpdateDatabaseStatusTask.OUpdateResult) {
+
+            try {
+              database1.getSyncConfiguration().setLastLSN(nodePayload.getKey(),
+                  ((OUpdateDatabaseStatusTask.OUpdateResult) nodePayload.getValue()).getSequenceNumber(), false);
+            } catch (IOException e) {
+              OLogManager.instance().error(this, "error updating lsn", e);
+            }
+          }
+
+        }
+      }
+
     }
   }
 
@@ -1212,7 +1273,7 @@ public abstract class ODistributedAbstractPlugin extends OServerPluginAbstract
 
     final Set<ORecordId> changedRecords = stg.recordsChangedRecently(checkIntegrityLastTxs);
     int av = getAvailableNodes(distrDatabase.getDatabaseName());
-    if (!changedRecords.isEmpty()) {
+    if (changedRecords != null && !changedRecords.isEmpty()) {
       ODistributedServerLog.info(this, nodeName, null, DIRECTION.NONE,
           "Executing the realignment of the last records modified before last close %s...", changedRecords);
       ODistributedConfiguration config = getDatabaseConfiguration(distrDatabase.getDatabaseName());
@@ -1564,7 +1625,7 @@ public abstract class ODistributedAbstractPlugin extends OServerPluginAbstract
     }
 
     final ODatabaseDocumentInternal db = installDatabaseOnLocalNode(databaseName, dbPath, iNode, fileName, delta,
-        uniqueClustersBackupDirectory, cfg);
+        uniqueClustersBackupDirectory, cfg, firstChunk.incremental, firstChunk.walSegment, firstChunk.walPosition);
 
     if (db == null)
       return;
@@ -1574,6 +1635,7 @@ public abstract class ODistributedAbstractPlugin extends OServerPluginAbstract
       distrDatabase.getSyncConfiguration().load();
       distrDatabase.getSyncConfiguration()
           .setLastLSN(localNodeName, ((OLocalPaginatedStorage) db.getStorage().getUnderlying()).getLSN(), false);
+
     } catch (IOException e) {
       ODistributedServerLog.error(this, nodeName, null, DIRECTION.NONE, "Error on loading %s file for database '%s'", e,
           DISTRIBUTED_SYNC_JSON_FILENAME, databaseName);
@@ -1764,7 +1826,7 @@ public abstract class ODistributedAbstractPlugin extends OServerPluginAbstract
     return result;
   }
 
-  protected abstract void notifyClients(String databaseName);
+  public abstract void notifyClients(String databaseName);
 
   protected void onDatabaseEvent(final String nodeName, final String databaseName, final DB_STATUS status) {
     updateLastClusterChange();
@@ -1895,7 +1957,7 @@ public abstract class ODistributedAbstractPlugin extends OServerPluginAbstract
 
   protected ODatabaseDocumentInternal installDatabaseOnLocalNode(final String databaseName, final String dbPath, final String iNode,
       final String iDatabaseCompressedFile, final boolean delta, final File uniqueClustersBackupDirectory,
-      final OModifiableDistributedConfiguration cfg) {
+      final OModifiableDistributedConfiguration cfg, boolean incremental, long walSegment, long walPosition) {
     ODistributedServerLog.info(this, nodeName, iNode, DIRECTION.IN, "Installing database '%s' to: %s...", databaseName, dbPath);
 
     try {
@@ -1964,7 +2026,61 @@ public abstract class ODistributedAbstractPlugin extends OServerPluginAbstract
           @Override
           public Void call(final OModifiableDistributedConfiguration cfg) {
             try {
-              if (delta) {
+              if (incremental) {
+                File dir = File.createTempFile("tmp", Long.toString(System.currentTimeMillis()));
+                if (dir.exists()) {
+                  dir.delete();
+                }
+                dir.mkdir();
+                File file = new File(iDatabaseCompressedFile);
+                file.renameTo(new File(dir, databaseName + "_full.ibu"));
+                OStorage storage = serverInstance.getDatabases()
+                    .fullSync(databaseName, dir.getAbsolutePath(), OrientDBConfig.defaultConfig());
+                ODistributedStorage distributedStorage = getStorage(databaseName);
+                distributedStorage.replaceIfNeeded((OAbstractPaginatedStorage) storage);
+                distributedStorage.saveDatabaseConfiguration();
+                distributedStorage.getLocalDistributedDatabase().getSyncConfiguration().save();
+                file.delete();
+                dir.delete();
+                if (uniqueClustersBackupDirectory != null && uniqueClustersBackupDirectory.exists()) {
+                  // RESTORE UNIQUE FILES FROM THE BACKUP FOLDERS. THOSE FILES ARE THE CLUSTERS OWNED EXCLUSIVELY BY CURRENT
+                  // NODE THAT WOULD BE LOST IF NOT REPLACED
+                  for (File f : uniqueClustersBackupDirectory.listFiles()) {
+                    final File oldFile = new File(dbPath + "/" + f.getName());
+                    if (oldFile.exists())
+                      oldFile.delete();
+
+                    // REPLACE IT
+                    if (!f.renameTo(oldFile))
+                      throw new ODistributedException(
+                          "Cannot restore exclusive cluster file '" + f.getAbsolutePath() + "' into " + oldFile.getAbsolutePath());
+                  }
+
+                  uniqueClustersBackupDirectory.delete();
+                }
+                OLogSequenceNumber lsn = new OLogSequenceNumber(walSegment, walPosition);
+                final OSyncDatabaseDeltaTask deployTask = new OSyncDatabaseDeltaTask(lsn,
+                    getMessageService().getDatabase(databaseName).getSyncConfiguration().getLastOperationTimestamp());
+
+                final Set<String> clustersOnLocalServer = cfg.getClustersOnServer(getLocalNodeName());
+                for (String c : clustersOnLocalServer)
+                  deployTask.includeClusterName(c);
+
+                final List<String> targetNodes = new ArrayList<String>(1);
+                targetNodes.add(iNode);
+
+                ODistributedServerLog
+                    .info(this, nodeName, iNode, DIRECTION.OUT, "Requesting database delta sync for '%s' LSN=%s...", databaseName,
+                        lsn);
+
+                try {
+                  final ODistributedResponse response = sendRequest(databaseName, null, targetNodes, deployTask,
+                      getNextMessageIdCounter(), ODistributedRequest.EXECUTION_MODE.RESPONSE, null, null, null);
+                } catch (Exception e) {
+                  e.printStackTrace();//TODO
+                }
+
+              } else if (delta) {
 
                 new OIncrementalServerSync().importDelta(serverInstance, databaseName, in, iNode);
 

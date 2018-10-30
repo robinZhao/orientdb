@@ -73,13 +73,21 @@ public class OSuffixIdentifier extends SimpleNode {
             return meta.get(varName);
           }
         }
-        return ((OElement) iCurrentRecord.getRecord()).getProperty(varName);
+        OElement rec = iCurrentRecord.getRecord();
+        if (rec == null) {
+          return null;
+        }
+        return rec.getProperty(varName);
       }
       return null;
     }
-    if (recordAttribute != null) {
-      return ((OElement) iCurrentRecord.getRecord()).getProperty(recordAttribute.name);
+    if (recordAttribute != null && iCurrentRecord != null) {
+      OElement rec = iCurrentRecord instanceof OElement ? (OElement) iCurrentRecord : iCurrentRecord.getRecord();
+      if (rec != null) {
+        return recordAttribute.evaluate(rec, ctx);
+      }
     }
+
     return null;
   }
 
@@ -92,7 +100,7 @@ public class OSuffixIdentifier extends SimpleNode {
       if (ctx != null && varName.equalsIgnoreCase("$parent")) {
         return ctx.getParent();
       }
-      if (ctx != null && ctx.getVariable(varName) != null) {
+      if (ctx != null && varName.startsWith("$") && ctx.getVariable(varName) != null) {
         return ctx.getVariable(varName);
       }
       if (iCurrentRecord != null) {
@@ -245,8 +253,8 @@ public class OSuffixIdentifier extends SimpleNode {
     return this;
   }
 
-  public boolean isEarlyCalculated() {
-    if (identifier != null && identifier.internalAlias) {
+  public boolean isEarlyCalculated(OCommandContext ctx) {
+    if (identifier != null && identifier.isEarlyCalculated(ctx)) {
       return true;
     }
     return false;

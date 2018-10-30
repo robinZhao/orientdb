@@ -11,10 +11,7 @@ import com.orientechnologies.orient.core.db.OExecutionThreadLocal;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
 import com.orientechnologies.orient.core.exception.OCommandExecutionException;
 import com.orientechnologies.orient.core.exception.OCommandInterruptedException;
-import com.orientechnologies.orient.core.index.OCompositeKey;
-import com.orientechnologies.orient.core.index.OIndex;
-import com.orientechnologies.orient.core.index.OIndexCursor;
-import com.orientechnologies.orient.core.index.OIndexDefinition;
+import com.orientechnologies.orient.core.index.*;
 import com.orientechnologies.orient.core.metadata.schema.OType;
 import com.orientechnologies.orient.core.sql.parser.*;
 
@@ -335,14 +332,23 @@ public class FetchFromIndexStep extends AbstractExecutionStep {
     List<OCollection> secondValueCombinations = cartesianProduct(fromKey);
     List<OCollection> thirdValueCombinations = cartesianProduct(toKey);
 
+    OIndexDefinition indexDef = index.getDefinition();
+
     for (int i = 0; i < secondValueCombinations.size(); i++) {
 
       Object secondValue = secondValueCombinations.get(i).execute((OResult) null, ctx);
+      if (secondValue instanceof List && ((List) secondValue).size() == 1 && indexDef.getFields().size() == 1
+          && !(indexDef instanceof OIndexDefinitionMultiValue)) {
+        secondValue = ((List) secondValue).get(0);
+      }
       secondValue = unboxOResult(secondValue);
       Object thirdValue = thirdValueCombinations.get(i).execute((OResult) null, ctx);
+      if (thirdValue instanceof List && ((List) thirdValue).size() == 1 && indexDef.getFields().size() == 1
+          && !(indexDef instanceof OIndexDefinitionMultiValue)) {
+        thirdValue = ((List) thirdValue).get(0);
+      }
       thirdValue = unboxOResult(thirdValue);
 
-      OIndexDefinition indexDef = index.getDefinition();
       try {
         secondValue = convertToIndexDefinitionTypes(secondValue, indexDef.getTypes());
         thirdValue = convertToIndexDefinitionTypes(thirdValue, indexDef.getTypes());
@@ -442,6 +448,24 @@ public class FetchFromIndexStep extends AbstractExecutionStep {
       for (Object o : OMultiValue.getMultiValueIterable(val)) {
         result.add(OType.convert(o, types[i++].getDefaultJavaType()));
       }
+      if (condition instanceof OAndBlock) {
+
+        for (int j = 0; j < ((OAndBlock) condition).getSubBlocks().size(); j++) {
+          OBooleanExpression subExp = ((OAndBlock) condition).getSubBlocks().get(j);
+          if (subExp instanceof OBinaryCondition) {
+            if (((OBinaryCondition) subExp).getOperator() instanceof OContainsKeyOperator) {
+              Map<Object, Object> newValue = new HashMap<>();
+              newValue.put(result.get(j), "");
+              result.set(j, newValue);
+            } else if (((OBinaryCondition) subExp).getOperator() instanceof OContainsValueOperator) {
+              Map<Object, Object> newValue = new HashMap<>();
+              newValue.put("", result.get(j));
+              result.set(j, newValue);
+            }
+          }
+        }
+
+      }
       return result;
     }
     return OType.convert(val, types[0].getDefaultJavaType());
@@ -453,8 +477,12 @@ public class FetchFromIndexStep extends AbstractExecutionStep {
     }
     for (OBooleanExpression exp : condition.getSubBlocks()) {
       if (exp instanceof OBinaryCondition) {
-        if (((OBinaryCondition) exp).getOperator() instanceof OEqualsCompareOperator) {
-          return true;
+        if (((OBinaryCondition) exp).getOperator() instanceof OEqualsCompareOperator || ((OBinaryCondition) exp)
+            .getOperator() instanceof OContainsKeyOperator || ((OBinaryCondition) exp)
+            .getOperator() instanceof OContainsValueOperator) {
+          //OK
+        } else {
+          return false;
         }
       } else if (exp instanceof OInCondition) {
         //OK
@@ -523,6 +551,7 @@ public class FetchFromIndexStep extends AbstractExecutionStep {
         rightValue = null;
       }
     }
+
     rightValue = definition.createValue(rightValue);
 
     if (definition.getFields().size() > 1 && !(rightValue instanceof Collection)) {
@@ -534,7 +563,8 @@ public class FetchFromIndexStep extends AbstractExecutionStep {
   private OIndexCursor createCursor(OBinaryCompareOperator operator, OIndexDefinition definition, Object value,
       OCommandContext ctx) {
     boolean orderAsc = isOrderAsc();
-    if (operator instanceof OEqualsCompareOperator) {
+    if (operator instanceof OEqualsCompareOperator || operator instanceof OContainsKeyOperator
+        || operator instanceof OContainsValueOperator) {
       return index.iterateEntries(toIndexKey(definition, value), orderAsc);
     } else if (operator instanceof OGeOperator) {
       return index.iterateEntriesMajor(value, true, orderAsc);
@@ -560,8 +590,8 @@ public class FetchFromIndexStep extends AbstractExecutionStep {
       if (exp instanceof OBinaryCondition) {
         OBinaryCondition binaryCond = ((OBinaryCondition) exp);
         OBinaryCompareOperator operator = binaryCond.getOperator();
-        if ((operator instanceof OEqualsCompareOperator) || (operator instanceof OGtOperator)
-            || (operator instanceof OGeOperator)) {
+        if ((operator instanceof OEqualsCompareOperator) || (operator instanceof OGtOperator) || (operator instanceof OGeOperator)
+            || (operator instanceof OContainsKeyOperator) || (operator instanceof OContainsValueOperator)) {
           result.add(binaryCond.getRight());
         } else if (additional != null) {
           result.add(additional.getRight());
@@ -600,8 +630,8 @@ public class FetchFromIndexStep extends AbstractExecutionStep {
       if (exp instanceof OBinaryCondition) {
         OBinaryCondition binaryCond = ((OBinaryCondition) exp);
         OBinaryCompareOperator operator = binaryCond.getOperator();
-        if ((operator instanceof OEqualsCompareOperator) || (operator instanceof OLtOperator)
-            || (operator instanceof OLeOperator)) {
+        if ((operator instanceof OEqualsCompareOperator) || (operator instanceof OLtOperator) || (operator instanceof OLeOperator)
+            || (operator instanceof OContainsKeyOperator) || (operator instanceof OContainsValueOperator)) {
           result.add(binaryCond.getRight());
         } else if (additional != null) {
           result.add(additional.getRight());

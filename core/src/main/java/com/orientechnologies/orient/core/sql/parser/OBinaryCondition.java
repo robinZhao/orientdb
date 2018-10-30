@@ -12,7 +12,12 @@ import com.orientechnologies.orient.core.metadata.schema.OClass;
 import com.orientechnologies.orient.core.sql.executor.OResult;
 import com.orientechnologies.orient.core.sql.executor.OResultInternal;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 public class OBinaryCondition extends OBooleanExpression {
   protected OExpression            left;
@@ -404,7 +409,7 @@ public class OBinaryCondition extends OBooleanExpression {
 
   @Override
   public OBooleanExpression rewriteIndexChainsAsSubqueries(OCommandContext ctx, OClass clazz) {
-    if (operator instanceof OEqualsCompareOperator && right.isEarlyCalculated() && left.isIndexChain(ctx, clazz)) {
+    if (operator instanceof OEqualsCompareOperator && right.isEarlyCalculated(ctx) && left.isIndexChain(ctx, clazz)) {
       OInCondition result = new OInCondition(-1);
 
       result.left = new OExpression(-1);

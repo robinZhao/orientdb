@@ -44,7 +44,16 @@ import com.orientechnologies.orient.core.storage.OStorage;
 import com.orientechnologies.orient.core.type.ODocumentWrapper;
 import com.orientechnologies.orient.core.type.ODocumentWrapperNoClass;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -197,9 +206,14 @@ public abstract class OIndexManagerAbstract extends ODocumentWrapperNoClass impl
     throw new UnsupportedOperationException();
   }
 
-  public OIndex<?> getIndex(final String iName) {
-    final Locale locale = getServerLocale();
+  public OIndex<?> getRawIndex(final String iName) {
+    final OIndex<?> index = indexes.get(iName);
+    if (index == null)
+      return null;
+    return index;
+  }
 
+  public OIndex<?> getIndex(final String iName) {
     final OIndex<?> index = indexes.get(iName);
     if (index == null)
       return null;

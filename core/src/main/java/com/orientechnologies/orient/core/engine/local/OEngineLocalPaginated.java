@@ -65,12 +65,17 @@ public class OEngineLocalPaginated extends OEngineAbstract {
 
   @Override
   public void startup() {
+    final String userName = System.getProperty("user.name", "unknown");
+    OLogManager.instance().infoNoDb(this, "System is started under an effective user : `%s`", userName);
+
     OMemoryAndLocalPaginatedEnginesInitializer.INSTANCE.initialize();
     super.startup();
 
     readCache = new O2QCache(calculateReadCacheMaxMemory(OGlobalConfiguration.DISK_CACHE_SIZE.getValueAsLong() * 1024 * 1024),
         OGlobalConfiguration.DISK_CACHE_PAGE_SIZE.getValueAsInteger() * 1024, true,
-        OGlobalConfiguration.DISK_CACHE_PINNED_PAGES.getValueAsInteger());
+        OGlobalConfiguration.DISK_CACHE_PINNED_PAGES.getValueAsInteger(),
+        OGlobalConfiguration.DISK_CACHE_PRINT_CACHE_STATISTICS.getValueAsBoolean(),
+        OGlobalConfiguration.DISK_CACHE_STATISTICS_INTERVAL.getValueAsInteger());
   }
 
   private long calculateReadCacheMaxMemory(final long cacheSize) {
@@ -89,10 +94,11 @@ public class OEngineLocalPaginated extends OEngineAbstract {
     //otherwise memory size will be set during cache initialization.
   }
 
-  public OStorage createStorage(final String dbName, final Map<String, String> configuration) {
+  public OStorage createStorage(final String dbName, final Map<String, String> configuration, long maxWalSegSize) {
     try {
 
-      return new OLocalPaginatedStorage(dbName, dbName, getMode(configuration), generateStorageId(), readCache, files);
+      return new OLocalPaginatedStorage(dbName, dbName, getMode(configuration), generateStorageId(), readCache, files,
+          maxWalSegSize);
     } catch (Exception e) {
       final String message =
           "Error on opening database: " + dbName + ". Current location is: " + new java.io.File(".").getAbsolutePath();

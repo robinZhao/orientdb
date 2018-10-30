@@ -1,5 +1,6 @@
 package com.orientechnologies.orient.core.sql.parser;
 
+import com.orientechnologies.orient.core.command.OBasicCommandContext;
 import org.junit.Assert;
 import org.junit.Ignore;
 import org.junit.Test;
@@ -11,7 +12,10 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class OSelectStatementTest {
 
@@ -617,8 +621,8 @@ public class OSelectStatementTest {
     List<OAndBlock> flattended = stm.whereClause.flatten();
     assertTrue(((OBinaryCondition) flattended.get(0).subBlocks.get(0)).left.isBaseIdentifier());
     assertFalse(((OBinaryCondition) flattended.get(0).subBlocks.get(0)).right.isBaseIdentifier());
-    assertFalse(((OBinaryCondition) flattended.get(0).subBlocks.get(0)).left.isEarlyCalculated());
-    assertTrue(((OBinaryCondition) flattended.get(0).subBlocks.get(0)).right.isEarlyCalculated());
+    assertFalse(((OBinaryCondition) flattended.get(0).subBlocks.get(0)).left.isEarlyCalculated(new OBasicCommandContext()));
+    assertTrue(((OBinaryCondition) flattended.get(0).subBlocks.get(0)).right.isEarlyCalculated(new OBasicCommandContext()));
 
   }
 
@@ -788,6 +792,15 @@ public class OSelectStatementTest {
     checkRightSyntax("select from V WHERE foo containsany ['foo', 'bar']");
     checkRightSyntax("select from V WHERE foo CONTAINSANY ['foo', 'bar']");
     checkWrongSyntax("select from V WHERE foo CONTAINSANY ");
+  }
+
+  @Test
+  public void testOrderByCollate() {
+    checkRightSyntax("select from V order by foo asc collate ci");
+    checkRightSyntax("select from V order by foo asc collate ci, bar desc collate ci");
+    checkRightSyntax("select from V order by foo collate ci, bar collate ci");
+    checkWrongSyntax("select from V order by foo collate ");
+    checkWrongSyntax("select from V order by foo asc collate ");
   }
 
   protected OrientSql getParserFor(String string) {
