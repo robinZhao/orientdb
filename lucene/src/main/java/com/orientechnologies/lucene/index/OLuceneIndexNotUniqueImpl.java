@@ -17,8 +17,8 @@ import java.util.stream.IntStream;
 public class OLuceneIndexNotUniqueImpl extends OLuceneFullTextIndex {
 
   public OLuceneIndexNotUniqueImpl(String name, String typeId, String algorithm, int version, OAbstractPaginatedStorage storage,
-      String valueContainerAlgorithm, ODocument metadata) {
-    super(name, typeId, algorithm, version, storage, valueContainerAlgorithm, metadata);
+      String valueContainerAlgorithm, ODocument metadata, int binaryFormatVersion) {
+    super(name, typeId, algorithm, version, storage, valueContainerAlgorithm, metadata, binaryFormatVersion);
   }
 
   @Override
